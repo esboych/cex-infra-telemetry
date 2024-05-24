@@ -1,0 +1,7 @@
+grafana:
+  adminPassword: "strongpassword"
+  service:
+    type: LoadBalancer
+prometheus:
+  prometheusSpec:
+    retention: "10d"

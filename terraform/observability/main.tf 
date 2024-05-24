@@ -1,0 +1,127 @@
+provider "helm" {
+  kubernetes {
+    config_path = "~/.kube/config"  // Ensure this path correctly points to your Kubernetes config file
+  }
+}
+
+provider "aws" {
+  region = var.region
+}
+
+# Namespace for monitoring tools
+resource "kubernetes_namespace" "monitoring" {
+  metadata {
+    name = "monitoring"
+  }
+}
+
+# Namespace for logging tools
+resource "kubernetes_namespace" "logging" {
+  metadata {
+    name = "logging"
+  }
+}
+
+# IAM role for Fluent Bit to allow sending logs to CloudWatch
+resource "aws_iam_role" "fluent_bit" {
+  name = "EKSFluentBit"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Action = "sts:AssumeRole",
+      Principal = {
+        Service = "eks.amazonaws.com"
+      },
+      Effect = "Allow",
+    }]
+  })
+}
+
+resource "aws_iam_policy" "fluent_bit_policy" {
+  name = "FluentBitCloudWatchPolicy"
+  description = "Allows Fluent Bit to send logs to CloudWatch"
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Action = [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+        "logs:DescribeLogStreams"
+      ],
+      Resource = "arn:aws:logs:*:*:*",
+      Effect = "Allow",
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "fluent_bit_policy_attachment" {
+  role       = aws_iam_role.fluent_bit.id
+  policy_arn = aws_iam_policy.fluent_bit_policy.arn
+}
+
+# CloudWatch Log Group for EKS Logs
+resource "aws_cloudwatch_log_group" "eks_logs" {
+  name              = "/aws/eks/${var.cluster_name}/logs"
+  retention_in_days = 90
+}
+
+# Deploy Fluent Bit via Helm chart
+resource "helm_release" "fluent_bit" {
+  name       = "fluent-bit"
+  repository = "https://fluent.github.io/helm-charts"
+  chart      = "fluent-bit"
+  namespace  = "kube-system"
+
+  set {
+    name  = "backend.type"
+    value = "cloudwatch"
+  }
+
+  set {
+    name  = "backend.cloudwatch.region"
+    value = var.region
+  }
+
+  set {
+    name  = "backend.cloudwatch.log_group_name"
+    value = aws_cloudwatch_log_group.eks_logs.name
+  }
+
+  set {
+    name  = "backend.cloudwatch.log_stream_prefix"
+    value = "eks/"
+  }
+
+  set {
+    name  = "backend.cloudwatch.auto_create_group"
+    value = "true"
+  }
+
+  set {
+    name  = "rbac.create"
+    value = "true"
+  }
+
+  set {
+    name  = "serviceAccount.create"
+    value = "true"
+  }
+
+  set {
+    name  = "serviceAccount.annotations.\"eks.amazonaws.com/role-arn\""
+    value = aws_iam_role.fluent_bit.arn
+  }
+}
+
+# Deploy Prometheus and Grafana via kube-prometheus-stack
+resource "helm_release" "prometheus_grafana" {
+  name       = "kube-prometheus-stack"
+  repository = "https://prometheus-community.github.io/helm-charts"
+  chart      = "kube-prometheus-stack"
+  namespace  = kubernetes_namespace.monitoring.metadata[0].name
+
+  values = [file("${path.module}/helm-charts/values.yaml")]
+}
