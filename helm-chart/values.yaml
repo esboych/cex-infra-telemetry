@@ -1,0 +1,36 @@
+replicaCount: 3
+
+image:
+  repository: <your-account-id>.dkr.ecr.<region>.amazonaws.com/cryptox
+  pullPolicy: IfNotPresent
+  tag: ""
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  annotations: {}
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+  
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "500m"
+  limits:
+    memory: "1024Mi"
+    cpu: "1000m"
+
+env:
+  DATABASE_URL: "postgres://user:password@hostname:5432/dbname"
+  REDIS_URL: "redis://hostname:6379"
+
+secret:
+  API_KEY: "base64_encoded_api_key"
+  SECRET_KEY: "base64_encoded_secret_key"
